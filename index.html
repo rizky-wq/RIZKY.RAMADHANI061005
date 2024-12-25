@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koreksi Lembar Jawaban</title>
+  <script src="https://docs.opencv.org/4.x/opencv.js" defer></script>
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #f4f4f9;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      background-color: #4CAF50;
+      color: white;
+      padding: 20px 0;
+      text-align: center;
+    }
+
+    main {
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+      background-color: #fff;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      border-radius: 10px;
+    }
+
+    h1, h3 {
+      margin-bottom: 20px;
+    }
+
+    input, button {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    canvas {
+      display: block;
+      margin: 20px auto;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .output-table {
+      margin: 20px auto;
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    .output-table th, .output-table td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .output-table th {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    .output-table td.correct {
+      background-color: #d4edda;
+      color: #155724;
+    }
+
+    .output-table td.incorrect {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 30px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Koreksi Lembar Jawaban</h1>
+  </header>
+
+  <main>
+    <h3>Unggah Gambar Lembar Jawaban</h3>
+    <input type="file" id="fileInput" accept="image/*" />
+    <h3>Masukkan Kunci Jawaban</h3>
+    <input type="text" id="answerKey" placeholder="Contoh: A,B,C,D,E,B,C,D,E" />
+    <button onclick="startCorrection()">Koreksi</button>
+    <canvas id="canvas"></canvas>
+    <h2>Hasil Koreksi</h2>
+    <table class="output-table">
+      <thead>
+        <tr>
+          <th>No</th>
+          <th>Jawaban</th>
+          <th>Kunci</th>
+          <th>Hasil</th>
+        </tr>
+      </thead>
+      <tbody id="outputTable"></tbody>
+    </table>
+  </main>
+
+  <footer>
+    <p>© 2024 Sistem Koreksi Lembar Jawaban</p>
+  </footer>
+
+  <script>
+    let uploadedImage = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('fileInput').addEventListener('change', handleImageUpload);
+    });
+
+    function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const img = new Image();
+        img.onload = () => uploadedImage = img;
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function startCorrection() {
+      if (!uploadedImage) {
+        alert("Silakan unggah gambar lembar jawaban terlebih dahulu!");
+        return;
+      }
+
+      const answerKeyInput = document.getElementById('answerKey').value;
+      const answerKey = answerKeyInput.split(',').map(ans => ans.trim().toUpperCase());
+      processImage(uploadedImage, answerKey);
+    }
+
+    function processImage(img, answerKey) {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const src = cv.imread(canvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+      const thresh = new cv.Mat();
+      cv.threshold(gray, thresh, 150, 255, cv.THRESH_BINARY_INV);
+
+      const contours = new cv.MatVector();
+      const hierarchy = new cv.Mat();
+      cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      const detectedCircles = [];
+      const outputTable = document.getElementById('outputTable');
+      outputTable.innerHTML = '';
+
+      for (let i = 0; i < contours.size(); i++) {
+        const cnt = contours.get(i);
+        const rect = cv.boundingRect(cnt);
+        const aspectRatio = rect.width / rect.height;
+
+        if (0.9 < aspectRatio && aspectRatio < 1.1 && rect.width > 10 && rect.width < 30) {
+          const cx = rect.x + rect.width / 2;
+          const cy = rect.y + rect.height / 2;
+          detectedCircles.push({ x: cx, y: cy, rect: rect });
+
+          ctx.strokeStyle = "green";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+        }
+      }
+
+      detectedCircles.sort((a, b) => a.y - b.y);
+
+      const detectedAnswers = detectedCircles.map(circle => {
+        const mean = cv.mean(thresh.roi(circle.rect));
+        return mean[0] < 127 ? 'Hitam' : '-';
+      });
+
+      const answersPerRow = 5;
+      const finalAnswers = [];
+      for (let i = 0; i < detectedAnswers.length; i += answersPerRow) {
+        const row = detectedAnswers.slice(i, i + answersPerRow);
+        const answerIndex = row.findIndex(ans => ans === 'Hitam');
+        finalAnswers.push(answerIndex >= 0 ? String.fromCharCode(65 + answerIndex) : '-');
+      }
+
+      for (let i = 0; i < answerKey.length; i++) {
+        const userAnswer = finalAnswers[i] || '-';
+        const correctAnswer = answerKey[i];
+        const isCorrect = userAnswer === correctAnswer ? "Benar" : "Salah";
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${i + 1}</td>
+          <td>${userAnswer}</td>
+          <td>${correctAnswer}</td>
+          <td class="${isCorrect === 'Benar' ? 'correct' : 'incorrect'}">${isCorrect}</td>
+        `;
+        outputTable.appendChild(row);
+      }
+
+      src.delete();
+      gray.delete();
+      thresh.delete();
+      contours.delete();
+      hierarchy.delete();
+    }
+  </script>
+</body>
+</html>
